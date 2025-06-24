@@ -333,9 +333,16 @@ extension PluginModule {
                     if config.version != 2 {
                         throw PluginEvaluationError.pluginUsesIncompatibleVersion(expected: 2, actual: config.version)
                     }
+                    #if os(Windows)
+                    let execSuffix = ".exe"
+                    #else
+                    let execSuffix = ""
+                    #endif
+                    let execFilePath = try config.executable.filePath.appending(extension: execSuffix)
+
                     self.invocationDelegate.pluginDefinedBuildCommand(
                         displayName: config.displayName,
-                        executable: try config.executable.filePath,
+                        executable: execFilePath,
                         arguments: config.arguments,
                         environment: config.environment,
                         workingDirectory: try config.workingDirectory.map{ try $0.filePath },
