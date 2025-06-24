@@ -977,6 +977,7 @@ extension ProjectModel.BuildSettings.Platform {
         case .windows: .windows
         case .wasi: .wasi
         case .openbsd: .openbsd
+        case .freebsd: .freebsd
         default: preconditionFailure("Unexpected platform: \(platform.name)")
         }
     }
@@ -987,7 +988,6 @@ extension ProjectModel.BuildSettings {
     mutating func configureDynamicSettings(
         productName: String,
         targetName: String,
-        executableName: String,
         packageIdentity: PackageIdentity,
         packageName: String?,
         createDylibForDynamicProducts: Bool,
@@ -995,10 +995,9 @@ extension ProjectModel.BuildSettings {
         delegate: PackagePIFBuilder.BuildDelegate
     ) {
         self[.TARGET_NAME] = targetName
-        self[.PRODUCT_NAME] = createDylibForDynamicProducts ? productName : executableName
+        self[.PRODUCT_NAME] = productName
         self[.PRODUCT_MODULE_NAME] = productName
         self[.PRODUCT_BUNDLE_IDENTIFIER] = "\(packageIdentity).\(productName)".spm_mangledToBundleIdentifier()
-        self[.EXECUTABLE_NAME] = executableName
         self[.CLANG_ENABLE_MODULES] = "YES"
         self[.SWIFT_PACKAGE_NAME] = packageName ?? nil
 
