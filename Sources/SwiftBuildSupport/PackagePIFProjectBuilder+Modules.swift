@@ -237,31 +237,29 @@ extension PackagePIFProjectBuilder {
     ) throws -> (PackagePIFBuilder.ModuleOrProduct, resourceBundleName: String?) {
         precondition(sourceModule.isSourceModule)
 
-        let pifProductName: String
-        let executableName: String
+        var pifProductName: String = sourceModule.name
+        var executableName: String? = nil
         let productType: ProjectModel.Target.ProductType
 
         switch desiredModuleType {
         case .dynamicLibrary:
             // We are re-using this default for dynamic targets as well.
             if pifBuilder.createDylibForDynamicProducts {
-                pifProductName = "lib\(sourceModule.name).dylib"
-                executableName = pifProductName
                 productType = .dynamicLibrary
             } else {
-                pifProductName = sourceModule.name + ".framework"
-                executableName = sourceModule.name
                 productType = .framework
             }
 
         case .staticLibrary, .executable:
+            #if os(Windows)
+            productType = .staticArchive
+            #else
             pifProductName = "\(sourceModule.name).o"
             executableName = pifProductName
             productType = .objectFile
+            #endif
 
         case .macro:
-            pifProductName = sourceModule.name
-            executableName = pifProductName
             productType = .hostBuildTool
         }
 
@@ -280,7 +278,7 @@ extension PackagePIFProjectBuilder {
             ProjectModel.Target(
                 id: sourceModule.pifTargetGUID(suffix: targetSuffix),
                 productType: productType,
-                name: "\(sourceModule.name)",
+                name: sourceModule.name,
                 productName: pifProductName,
                 approvedByUser: approvedByUser
             )
@@ -407,12 +405,12 @@ extension PackagePIFProjectBuilder {
             settings.configureDynamicSettings(
                 productName: sourceModule.name,
                 targetName: sourceModule.name,
-                executableName: executableName,
                 packageIdentity: package.identity,
                 packageName: sourceModule.packageName,
                 createDylibForDynamicProducts: pifBuilder.createDylibForDynamicProducts,
                 installPath: "/usr/local/lib",
-                delegate: pifBuilder.delegate
+                delegate: pifBuilder.delegate,
+                executableName: executableName
             )
         } else {
             settings[.TARGET_NAME] = sourceModule.name
@@ -420,7 +418,9 @@ extension PackagePIFProjectBuilder {
             settings[.PRODUCT_MODULE_NAME] = sourceModule.c99name
             settings[.PRODUCT_BUNDLE_IDENTIFIER] = "\(self.package.identity).\(sourceModule.name)"
                 .spm_mangledToBundleIdentifier()
-            settings[.EXECUTABLE_NAME] = executableName
+            if let executableName {
+                settings[.EXECUTABLE_NAME] = executableName
+            }
             settings[.CLANG_ENABLE_MODULES] = "YES"
             settings[.GENERATE_PRELINK_OBJECT_FILE] = "NO"
             settings[.STRIP_INSTALLED_PRODUCT] = "NO"
