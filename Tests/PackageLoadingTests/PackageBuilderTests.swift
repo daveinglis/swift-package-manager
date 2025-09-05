@@ -589,7 +589,6 @@ struct PackageBuilderTests {
         .IssueWindowsRelativePathAssert
     )
     func testTestManifestSearch() throws {
-        try withKnownIssue(isIntermittent: true) {
         let fs = InMemoryFileSystem(emptyFiles:
             "/pkg/foo.swift",
             "/pkg/footests.swift"
@@ -619,9 +618,6 @@ struct PackageBuilderTests {
                 product.check(type: .test, targets: ["tests"])
                 product.check(testEntryPointPath: nil)
             }
-        }
-        } when: {
-            ProcessInfo.hostOperatingSystem == .windows
         }
     }
 
