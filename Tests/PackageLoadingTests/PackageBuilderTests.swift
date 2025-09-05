@@ -564,8 +564,6 @@ final class PackageBuilderTests: XCTestCase {
     }
 
     func testTestManifestSearch() throws {
-        try XCTSkipOnWindows(because: "possibly related to https://github.com/swiftlang/swift-package-manager/issues/8511")
-
         let fs = InMemoryFileSystem(emptyFiles:
             "/pkg/foo.swift",
             "/pkg/footests.swift"

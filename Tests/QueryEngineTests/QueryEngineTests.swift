@@ -105,7 +105,11 @@ struct QueryEngineTests {
         .disabled(if: ProcessInfo.hostOperatingSystem == .windows),
     )
     func filePathHashing() throws {
+#if os(Windows)
+        let path = "C:\\root"
+#else
         let path = "/root"
+#endif
 
         let hashEncoder1 = HashEncoder<SHA256>()
         try hashEncoder1.encode(FilePath(path))
