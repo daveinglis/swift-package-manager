@@ -15,4 +15,8 @@ let inputData = FileManager.default.contents(atPath: inputFile) ?? Data()
 let dataAsHex = inputData.map { String(format: "%02hhx", $0) }.joined()
 let outputString = "public let \(variableName) = \(dataAsHex.quotedForSourceCode)\n"
 let outputData = outputString.data(using: .utf8)
-FileManager.default.createFile(atPath: outputFile, contents: outputData)
+guard FileManager.default.createFile(atPath: outputFile, contents: outputData) else {
+    throw "Couldn’t create file at path \(outputFile)"
+}
+
+extension String: Error {}

@@ -252,7 +252,7 @@ public enum TestError: Error {
     do {
         // Make a suitable test directory name from the fixture subpath.
         let fixtureSubpath = try RelativePath(validating: name)
-        let copyName = fixtureSubpath.components.joined(separator: "_")
+        let copyName = fixtureSubpath.components.last!
 
         // Create a temporary directory for the duration of the block.
         return try await withTemporaryDirectory(
@@ -314,15 +314,41 @@ fileprivate func setup(
     fixtureDir: AbsolutePath,
     in tmpDirPath: AbsolutePath,
     copyName: String,
-    createGitRepo: Bool = true
+    createGitRepo: Bool,
 ) throws -> AbsolutePath {
     func copy(from srcDir: AbsolutePath, to dstDir: AbsolutePath) throws {
-        #if os(Windows)
-        try localFileSystem.copy(from: srcDir, to: dstDir)
-        #else
-        try Process.checkNonZeroExit(args: "cp", "-R", "-H", srcDir.pathString, dstDir.pathString)
-        #endif
-        
+
+        // Pure Swift copy implementation that follows symlinks
+        func copyItem(from source: AbsolutePath, to destination: AbsolutePath) throws {
+            // Resolve symlinks to follow them
+            let resolvedSource: AbsolutePath
+            if localFileSystem.isSymlink(source) {
+                resolvedSource = try resolveSymlinks(source)
+            } else {
+                resolvedSource = source
+            }
+
+            if localFileSystem.isDirectory(resolvedSource) {
+                // Create destination directory if it doesn't exist
+                if !localFileSystem.exists(destination) {
+                    try localFileSystem.createDirectory(destination, recursive: true)
+                }
+
+                // Recursively copy directory contents
+                let contents = try localFileSystem.getDirectoryContents(resolvedSource)
+                for item in contents {
+                    let sourcePath = resolvedSource.appending(component: item)
+                    let destPath = destination.appending(component: item)
+                    try copyItem(from: sourcePath, to: destPath)
+                }
+            } else if localFileSystem.isFile(resolvedSource) {
+                // Copy file contents
+                let contents = try localFileSystem.readFileContents(resolvedSource)
+                try localFileSystem.writeFileContents(destination, bytes: contents)
+            }
+        }
+
+        try copyItem(from: srcDir, to: dstDir)
         // Ensure we get a clean test fixture.
         try localFileSystem.removeFileTree(dstDir.appending(component: ".build"))
         try localFileSystem.removeFileTree(dstDir.appending(component: ".swiftpm"))
@@ -549,7 +575,7 @@ private func swiftArgs(
     return args
 }
 
-@available(*, 
+@available(*,
     deprecated,
     renamed: "loadModulesGraph",
     message: "Rename for consistency: the type of this functions return value is named `ModulesGraph`."
@@ -694,7 +720,7 @@ public func getNumberOfMatches(of match: String, in value: String) -> Int {
 }
 
 public extension String {
-    var withSwiftLineEnding: String {   
+    var withSwiftLineEnding: String {
         return replacingOccurrences(of: "\r\n", with: "\n")
     }
 }
