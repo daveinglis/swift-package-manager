@@ -682,6 +682,20 @@ extension ObservabilityMetadata {
     }
 }
 
+extension ObservabilityMetadata {
+    /// When `true`, `SwiftCommandObservabilityHandler` skips writing this diagnostic
+    /// to the output stream because the caller has already written it directly
+    /// (synchronously) to avoid race conditions with the progress animation.
+    package var displaySuppressed: Bool? {
+        get { self[DisplaySuppressedKey.self] }
+        set { self[DisplaySuppressedKey.self] = newValue }
+    }
+
+    private enum DisplaySuppressedKey: Key {
+        typealias Value = Bool
+    }
+}
+
 // MARK: - Compatibility with TSC Diagnostics APIs
 
 @available(*, deprecated, message: "temporary for transition TSCBasic.Diagnostic -> SwiftDriver.Diagnostic")

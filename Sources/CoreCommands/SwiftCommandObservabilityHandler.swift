@@ -97,6 +97,11 @@ public struct SwiftCommandObservabilityHandler: ObservabilityHandlerProvider {
                 guard diagnostic.severity >= self.logLevel else {
                     return
                 }
+                // If the caller already wrote this diagnostic directly (synchronously) to avoid
+                // race conditions with the progress animation, skip the async write here.
+                guard diagnostic.metadata?.displaySuppressed != true else {
+                    return
+                }
 
                 // TODO: do something useful with scope
                 var output: String

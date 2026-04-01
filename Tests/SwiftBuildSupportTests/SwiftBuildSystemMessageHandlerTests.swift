@@ -219,6 +219,72 @@ struct SwiftBuildSystemMessageHandlerTests {
         }
     }
 
+    // Regression test for a bug where swift-driver warnings (e.g. "warning: next compile won't
+    // be incremental") appeared on the same line as the build progress indicator.
+    //
+    // The root cause: emitDiagnosticCompilerOutput() used observabilityScope.print(), which
+    // dispatches to the observability handler's serial queue asynchronously. By the time the
+    // write ran, a subsequent progressAnimation.update() call could have written new progress
+    // text to the terminal (without a trailing newline), causing the warning to be appended to
+    // that progress line rather than appearing on its own line.
+    //
+    // The fix: write directly to outputStream (synchronously), matching LLBuildProgressTracker.
+    //
+    // This test validates the fix by using SEPARATE streams for the handler and the observability
+    // scope. The warning must appear in the handler's outputStream (direct write), not in the
+    // observability scope's stream (which the old async path would have used).
+    @Test
+    func testCompilerOutputWritesDirectlyToOutputStream() throws {
+        // Separate streams so we can distinguish direct outputStream writes from
+        // observabilityScope.print() writes.
+        let handlerOutputStream = BufferedOutputByteStream()
+        let observabilityOutputStream = BufferedOutputByteStream()
+        let observability = ObservabilitySystem.makeForTesting(outputStream: observabilityOutputStream)
+        let messageHandler = SwiftBuildSystemMessageHandler(
+            observabilityScope: observability.topScope,
+            outputStream: handlerOutputStream,
+            logLevel: .warning
+        )
+
+        let warningString = "warning: next compile won't be incremental\n"
+
+        let events: [SwiftBuildMessage] = [
+            .taskStartedInfo(taskID: 1, taskSignature: "task-1"),
+            .outputInfo(
+                data: data(warningString),
+                locationContext: .task(taskID: 1, targetID: 1),
+                locationContext2: .init(targetID: 1, taskSignature: "task-1")
+            ),
+            // appendToOutputStream: false → marks the task ID for emitDiagnosticCompilerOutput
+            .diagnostic(
+                kind: .warning,
+                locationContext: .task(taskID: 1, targetID: 1),
+                locationContext2: .init(taskSignature: "task-1"),
+                appendToOutputStream: false
+            ),
+            .taskCompleteInfo(taskID: 1, taskSignature: "task-1", result: .success),
+            .buildCompletedInfo(),
+        ]
+
+        for event in events {
+            _ = try messageHandler.emitEvent(event)
+        }
+
+        let handlerOutput = handlerOutputStream.bytes.description
+        let observabilityOutput = observabilityOutputStream.bytes.description
+
+        // Post-fix: output is written synchronously via outputStream.send(), so it appears in
+        // handlerOutputStream, not in the observability scope's stream.
+        #expect(
+            handlerOutput.contains(warningString),
+            "Compiler output must be written directly to outputStream, not through observabilityScope.print()"
+        )
+        #expect(
+            !observabilityOutput.contains(warningString),
+            "Compiler output must not go through observabilityScope.print() (async path that races with progress animation)"
+        )
+    }
+
     @Test
     func testCompilerOutputDiagnosticsWithoutDuplicatedLogging() throws {
         let messageHandler = self.messageHandler.warning
@@ -335,7 +401,7 @@ struct SwiftBuildSystemMessageHandlerTests {
         for event in events {
             _ = try messageHandler.emitEvent(event)
         }
-        
+
         #expect(!self.observability.hasWarningDiagnostics)
         #expect(!self.observability.hasErrorDiagnostics)
         #expect(self.observability.diagnostics.count == 1)

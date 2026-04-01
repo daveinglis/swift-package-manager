@@ -50,6 +50,12 @@ public final class SwiftBuildSystemMessageHandler {
     private var failedTasks: [Int] = []
     /// Tracks the tasks by their signature for which we have already emitted output.
     private var tasksEmitted: EmittedTasks = .init()
+    /// Shared deduplication set used by both emitDiagnosticCompilerOutput and emitInfoAsDiagnostic.
+    /// Contains the plain-text form of every severity-prefixed diagnostic line that has been
+    /// emitted or committed to be emitted (e.g. "warning: next compile won't be incremental...").
+    /// Both paths read from and write to this set so that whichever runs first wins and the
+    /// second is suppressed, regardless of ordering (child-before-parent or parent-before-child).
+    private var emittedDiagnosticLines: Set<String> = []
 
     public init(
         observabilityScope: ObservabilityScope,
@@ -64,11 +70,22 @@ public final class SwiftBuildSystemMessageHandler {
         self.logLevel = logLevel
         self.progressAnimation = ProgressAnimation.ninja(
             stream: outputStream,
-            verbose: self.logLevel.isVerbose,
+            verbose: logLevel.isVerbose,
             normalizeStep: false
         )
         self.enableBacktraces = enableBacktraces
         self.buildDelegate = buildDelegate
+    }
+
+    /// Normalises a diagnostic line for deduplication across code paths and platforms.
+    ///
+    /// Raw compiler output on Windows uses native backslash path separators while
+    /// SwiftBuild's structured `DiagnosticInfo.message` may normalise them to forward
+    /// slashes. Comparing the two would produce false negatives. Normalising to forward
+    /// slashes here makes the comparison reliable on all platforms.
+    private static func dedupKey(_ line: String) -> String {
+        line.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\\", with: "/")
     }
 
     private func emitInfoAsDiagnostic(info: SwiftBuildMessage.DiagnosticInfo) {
@@ -88,7 +105,54 @@ public final class SwiftBuildSystemMessageHandler {
         case .note: .info
         case .remark: .debug
         }
-        self.observabilityScope.emit(severity: severity, message: "\(message)\n")
+
+        // Deduplicate against the raw output path (emitDiagnosticCompilerOutput).
+        // SwiftBuild may route the same compiler warning both as a raw .output message
+        // (attributed to a child task) and as a structured .diagnostic message (attributed
+        // to a parent task). Whichever path runs first wins; the second is suppressed.
+        //
+        // Only suppress locationless diagnostics: their plain text ("warning: msg") is
+        // identical to what the compiler writes to stderr. Diagnostics with source locations
+        // produce a richer format (source-code snippet) that the raw path cannot replicate,
+        // so they must always be emitted even if a raw line overlaps.
+        if info.location.userDescription == nil {
+            let prefix: String = switch info.kind {
+            case .error: "error: "
+            case .warning: "warning: "
+            case .note: "note: "
+            case .remark: "remark: "
+            }
+            let line = Self.dedupKey(prefix + info.message)
+            if emittedDiagnosticLines.contains(line) {
+                for childDiagnostic in info.childDiagnostics {
+                    emitInfoAsDiagnostic(info: childDiagnostic)
+                }
+                return
+            }
+            // Pre-register before the async dispatch so that if emitDiagnosticCompilerOutput
+            // runs later for the same content it will skip it.
+            emittedDiagnosticLines.insert(line)
+        }
+
+        // Write directly to outputStream (synchronously) rather than routing through
+        // observabilityScope.emit()'s async dispatch. The async path can race with subsequent
+        // progressAnimation.update() calls on the for-await task, causing the warning to
+        // appear on the same line as the progress indicator in captured/piped output.
+        let severityPrefix: String = switch info.kind {
+        case .error: "error: "
+        case .warning: "warning: "
+        case .note: "note: "
+        case .remark: "remark: "
+        }
+        progressAnimation.clear()
+        outputStream.send(severityPrefix + message + "\n")
+        outputStream.flush()
+
+        // Record in observability (for tests and tooling) with displaySuppressed=true so that
+        // SwiftCommandObservabilityHandler skips the async write and avoids a duplicate.
+        var metadata = ObservabilityMetadata()
+        metadata.displaySuppressed = true
+        self.observabilityScope.emit(severity: severity, message: message, metadata: metadata)
 
         for childDiagnostic in info.childDiagnostics {
             emitInfoAsDiagnostic(info: childDiagnostic)
@@ -105,14 +169,48 @@ public final class SwiftBuildSystemMessageHandler {
             return
         }
 
-        // Decode the buffer to a string
+        // Decode the buffer to a string.
         let decodedOutput = String(decoding: buffer, as: UTF8.self)
 
-        // Emit message.
-        observabilityScope.print(decodedOutput, condition: condition)
+        // Extract the severity-prefixed lines (e.g. "warning: ...", "error: ...").
+        // These are the meaningful signal for cross-task and cross-path deduplication.
+        let severityPrefixes = ["warning: ", "error: ", "note: ", "remark: "]
+        let diagnosticLines = decodedOutput
+            .components(separatedBy: .newlines)
+            .map { Self.dedupKey($0) }
+            .filter { line in severityPrefixes.contains(where: { line.hasPrefix($0) }) }
 
-        // Record that we've emitted the output for a given task.
+        // Skip if every diagnostic line in this buffer was already emitted — either by an
+        // earlier call to this function for a different task whose buffer contained the same
+        // lines, or by emitInfoAsDiagnostic via the structured diagnostic path.
+        if !diagnosticLines.isEmpty && diagnosticLines.allSatisfy({ emittedDiagnosticLines.contains($0) }) {
+            self.tasksEmitted.insert(info)
+            return
+        }
+
+        // Write directly to outputStream (synchronously) rather than routing through
+        // observabilityScope.print(), which dispatches to a separate serial queue. The async
+        // dispatch means the write can race with subsequent progressAnimation.update() calls,
+        // causing the output to appear on the same line as the progress indicator.
+        // This matches the pattern used by LLBuildProgressTracker.
+        switch condition {
+        case .always:
+            progressAnimation.clear()
+            outputStream.send(decodedOutput)
+            outputStream.flush()
+        case .onlyWhenVerbose:
+            if logLevel.isVerbose {
+                progressAnimation.clear()
+                outputStream.send(decodedOutput)
+                outputStream.flush()
+            }
+        }
+
+        // Record that we've emitted the output for a given task, and track the individual
+        // diagnostic lines so that emitInfoAsDiagnostic and subsequent calls here can skip
+        // content that was already written.
         self.tasksEmitted.insert(info)
+        diagnosticLines.forEach { self.emittedDiagnosticLines.insert($0) }
     }
 
     private func handleTaskOutput(
@@ -539,6 +637,7 @@ extension SwiftBuildSystemMessageHandler.BuildState {
             if let taskID = info.locationContext.taskID,
                let taskSignature = self.taskSignature(for: taskID) {
                 self.taskDataBuffer[taskSignature, default: .init()].append(info.data)
+                return
             }
 
             self.taskDataBuffer[info.locationContext, default: .init()].append(info.data)
