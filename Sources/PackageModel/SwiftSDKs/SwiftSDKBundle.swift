@@ -14,7 +14,6 @@ import Basics
 
 import struct Foundation.URL
 import protocol TSCBasic.FileSystem
-import struct TSCBasic.RegEx
 
 /// Represents an `.artifactbundle` on the filesystem that contains a Swift SDK.
 public struct SwiftSDKBundle {
