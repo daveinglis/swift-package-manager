@@ -15,7 +15,6 @@
 import Basics
 import struct Foundation.URL
 import protocol TSCBasic.FileSystem
-import struct TSCBasic.RegEx
 import protocol TSCUtility.ProgressAnimationProtocol
 
 public final class SwiftSDKBundleStore {

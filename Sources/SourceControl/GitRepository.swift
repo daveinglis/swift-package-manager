@@ -24,7 +24,6 @@ import enum TSCBasic.FileMode
 import struct TSCBasic.FileSystemError
 import class Basics.AsyncProcess
 import struct Basics.AsyncProcessResult
-import struct TSCBasic.RegEx
 
 import protocol TSCUtility.DiagnosticLocationProviding
 import enum TSCUtility.Git
@@ -1488,20 +1487,20 @@ public enum GitProgressParser: FetchProgress {
         (?:, \h+ (?<i18>[0-9]+.?[0-9]+ \h [A-Z]iB) \h+ \| \h+ (?<i19>[0-9]+.?[0-9]+ \h [A-Z]iB\/s))?
     )
     """#
-    static let regex = try? RegEx(pattern: pattern)
+    static let regex = try? Regex(pattern)
 
     init?(from string: String) {
-        guard let matches = GitProgressParser.regex?.matchGroups(in: string).first,
-              matches.count == 20 else { return nil }
+        guard let regex = GitProgressParser.regex,
+              let match = string.firstMatch(of: regex) else { return nil }
 
-        if matches[0] == "Enumerating objects" {
-            guard let currentObjects = Int(matches[1]) else { return nil }
+        if match["i0"]?.substring == "Enumerating objects" {
+            guard let i1 = match["i1"]?.substring, let currentObjects = Int(i1) else { return nil }
 
             self = .enumeratingObjects(currentObjects: currentObjects)
-        } else if matches[2] == "Counting objects" {
-            guard let progress = Double(matches[3]),
-                  let currentObjects = Int(matches[4]),
-                  let totalObjects = Int(matches[5]) else { return nil }
+        } else if match["i2"]?.substring == "Counting objects" {
+            guard let i3 = match["i3"]?.substring, let progress = Double(i3),
+                  let i4 = match["i4"]?.substring, let currentObjects = Int(i4),
+                  let i5 = match["i5"]?.substring, let totalObjects = Int(i5) else { return nil }
 
             self = .countingObjects(
                 progress: progress / 100,
@@ -1509,10 +1508,10 @@ public enum GitProgressParser: FetchProgress {
                 totalObjects: totalObjects
             )
 
-        } else if matches[6] == "Compressing objects" {
-            guard let progress = Double(matches[7]),
-                  let currentObjects = Int(matches[8]),
-                  let totalObjects = Int(matches[9]) else { return nil }
+        } else if match["i6"]?.substring == "Compressing objects" {
+            guard let i7 = match["i7"]?.substring, let progress = Double(i7),
+                  let i8 = match["i8"]?.substring, let currentObjects = Int(i8),
+                  let i9 = match["i9"]?.substring, let totalObjects = Int(i9) else { return nil }
 
             self = .compressingObjects(
                 progress: progress / 100,
@@ -1520,10 +1519,10 @@ public enum GitProgressParser: FetchProgress {
                 totalObjects: totalObjects
             )
 
-        } else if matches[10] == "Resolving deltas" {
-            guard let progress = Double(matches[11]),
-                  let currentObjects = Int(matches[12]),
-                  let totalObjects = Int(matches[13]) else { return nil }
+        } else if match["i10"]?.substring == "Resolving deltas" {
+            guard let i11 = match["i11"]?.substring, let progress = Double(i11),
+                  let i12 = match["i12"]?.substring, let currentObjects = Int(i12),
+                  let i13 = match["i13"]?.substring, let totalObjects = Int(i13) else { return nil }
 
             self = .resolvingDeltas(
                 progress: progress / 100,
@@ -1531,13 +1530,13 @@ public enum GitProgressParser: FetchProgress {
                 totalObjects: totalObjects
             )
 
-        } else if matches[14] == "Receiving objects" {
-            guard let progress = Double(matches[15]),
-                  let currentObjects = Int(matches[16]),
-                  let totalObjects = Int(matches[17]) else { return nil }
+        } else if match["i14"]?.substring == "Receiving objects" {
+            guard let i15 = match["i15"]?.substring, let progress = Double(i15),
+                  let i16 = match["i16"]?.substring, let currentObjects = Int(i16),
+                  let i17 = match["i17"]?.substring, let totalObjects = Int(i17) else { return nil }
 
-            let downloadProgress = matches[18]
-            let downloadSpeed = matches[19]
+            let downloadProgress = match["i18"]?.substring.map(String.init)
+            let downloadSpeed = match["i19"]?.substring.map(String.init)
 
             self = .receivingObjects(
                 progress: progress / 100,
