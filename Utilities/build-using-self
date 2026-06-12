@@ -112,6 +112,16 @@ def get_arguments() -> argparse.Namespace:
         default=""
     )
     parser.add_argument(
+        "--test-build-systems",
+        type=str,
+        dest="test_build_systems",
+        default=None,
+        help="Comma-separated build systems for parameterized tests to exercise "
+             "(e.g. 'swiftbuild' or 'native,swiftbuild'). Sets the "
+             "SWIFTPM_TEST_BUILD_SYSTEMS environment variable. When omitted, any "
+             "externally-set value is preserved and tests use the platform default.",
+    )
+    parser.add_argument(
         "--skip-bootstrap",
         dest="skip_bootstrap",
         action="store_true"
@@ -153,8 +163,14 @@ def is_on_darwin() -> bool:
     return platform.system() == "Darwin"
 
 
-def set_environment() -> None:
+def set_environment(test_build_systems: t.Optional[str] = None) -> None:
     os.environ["SWIFTCI_IS_SELF_HOSTED"] = "1"
+
+    # Control which build systems parameterized tests exercise. When the flag is
+    # omitted we leave any externally-set value untouched (CI may set the env var
+    # directly), so tests fall back to the platform default.
+    if test_build_systems:
+        os.environ["SWIFTPM_TEST_BUILD_SYSTEMS"] = test_build_systems
 
     # Ensure SDKROOT is configure
     if is_on_darwin():
@@ -262,7 +278,7 @@ def main() -> None:
             else:
                 signal.signal(signal.SIGQUIT, signal_handler)
 
-            set_environment()
+            set_environment(test_build_systems=args.test_build_systems)
 
             call(
                 filterIsTruthy(
